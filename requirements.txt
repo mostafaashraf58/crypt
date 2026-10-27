@@ -1,0 +1,8 @@
+fastapi>=0.115,<1
+uvicorn>=0.30,<1
+httpx>=0.27,<1
+websockets>=13,<17
+keyring>=25,<26
+duckdb>=1.1,<2
+pyarrow>=18,<25
+pytest>=8,<10
