@@ -24,7 +24,13 @@ for (const market of data.markets) {
 }
 const context = { ...data, console, crypto: globalThis.crypto, localStorage: { setItem() {} }, setInterval() {}, AbortSignal, fetch, URL, URLSearchParams };
 vm.createContext(context);
-const source = fs.readFileSync('src/api.ts', 'utf8').replace(/^import .*;\n/gm, '').replace(/^export /gm, '');
+const prepareSource = text => text.replace(/\r\n?/g, '\n').replace(/^import .*;\n/gm, '').replace(/^export /gm, '');
+check('VM source preparation handles Windows CRLF and Unix LF', () => {
+  const sample = 'import { useEffect } from "react";\nexport const value = 1;\n';
+  assert.equal(prepareSource(sample), prepareSource(sample.replaceAll('\n', '\r\n')));
+  assert(!prepareSource(sample).includes('import '));
+});
+const source = prepareSource(fs.readFileSync('src/api.ts', 'utf8'));
 const compiled = await transform(source, { loader: 'ts', target: 'es2022' });
 vm.runInContext(compiled.code + ';globalThis.test={executePaper,localBacktest,revalue,actions,getInstruments,getState:()=>state,setState:s=>{state=s;},setConnection:c=>{connection=c;connected=!!c;},fixtureTick};', context);
 const { executePaper, localBacktest, actions } = context.test;
