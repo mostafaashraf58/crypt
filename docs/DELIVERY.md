@@ -1,6 +1,6 @@
 # Delivery notes
 
-Axiom is delivered as local application source and a working offline browser preview. No cloud backend is deployed.
+Axiom is delivered as local application source, a working offline browser preview, and a locally built unsigned Windows x64 installer. No cloud backend is deployed.
 
 ## Open the preview
 
@@ -24,6 +24,6 @@ Extract `Axiom-Workstation-Source.zip`, open PowerShell in its `axiom-workstatio
 
 See `docs/TEST-RESULTS.md` and `docs/UI-TEST-RESULTS.md` for executed checks. Real-money orders were never submitted. No brokerage credentials or real external model service were provided, so those integrations remain unverified against a real account. Adapter behavior was tested using offline transports and fixtures.
 
-The Windows installer has **not been compiled or run** in this Linux environment. Tauri configuration and command permissions were checked against the installed schema, but native Rust/MSVC compilation and WebView2 runtime behavior require the supplied Windows build and a Windows test run. This is source with a build path, not an already verified Windows installer.
+The Windows x64 installer was built locally and passed temporary installation, desktop startup, engine health/authentication, loopback binding, process-tree cleanup on close, and uninstall checks on 29 October 2026. The artifact is `src-tauri/target/release/bundle/nsis/Axiom Workstation_0.1.0_x64-setup.exe`. See `docs/WINDOWS-VERIFICATION.md` for its checksum and verification limits. Desktop visual workflows and credential-vault operations still require separate verification.
 
 Kraken market data and account inspection are supported; live Kraken proposals are blocked until complete equity/cost-basis reconciliation exists. Alpaca supplies the manually confirmed live path. Backtests currently use the deterministic momentum model; arbitrary HTTP-model historical replay is not implemented. Local operation requires the application and PC to remain running.

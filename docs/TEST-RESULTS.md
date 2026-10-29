@@ -1,5 +1,7 @@
 # Test results
 
+Latest Windows checkpoint (29 October 2026): 59 Python tests and 44 frontend checks passed, the production and native installer builds succeeded, and installed-app lifecycle checks passed. See [Windows verification](WINDOWS-VERIFICATION.md). The Linux results below are retained as an earlier checkpoint.
+
 Validation performed in the Linux build workspace using Python 3.12 on 26 October 2026.
 
 Full Python command: `.venv/bin/python -m pytest tests -q`
@@ -31,13 +33,13 @@ The backtest evaluates models using completed candles only and fills signals on 
 
 ## Verification limits
 
-No real brokerage credentials were supplied. Authenticated brokerage/exchange operations and real model endpoints require verification with the user's accounts. No real-money order was submitted. The Windows installer must be compiled and tested on Windows with the supplied build script or Windows CI workflow; this Linux workspace cannot verify Windows runtime behavior.
+No real brokerage credentials were supplied. Authenticated brokerage/exchange operations and real model endpoints require verification with the user's accounts. No real-money order was submitted. Windows native compilation and installed-engine lifecycle were subsequently verified locally; see `WINDOWS-VERIFICATION.md`.
 
 ## Frontend and runtime
 
 `npm run build` passes TypeScript and the Vite production build. `node tests/frontend.mjs` passes **43 checks**, including all fixture OHLCV invariants, accounting/fees/slippage, allocation/exposure rejection, no-look-ahead regression, model credential exclusion, instrument discovery without simulated price leakage, and provider-specific proposal payloads.
 
-A real Python child-process smoke test passed authenticated HTTP, unauthorized rejection, exact localhost CORS, weekly fixture candles, exclusive port-zero binding and token redaction from stdout/stderr. An invalid bootstrap token exits without echoing its value. The Tauri configuration, capability declaration and Cargo manifest validate; native Windows compilation remains unverified.
+A real Python child-process smoke test passed authenticated HTTP, unauthorized rejection, exact localhost CORS, weekly fixture candles, exclusive port-zero binding and token redaction from stdout/stderr. An invalid bootstrap token exits without echoing its value. The Tauri configuration, capability declaration and Cargo manifest validate; native Windows compilation subsequently passed.
 
 Python dependencies tested: FastAPI 0.162.0, Uvicorn 0.54.0, httpx 0.28.1, websockets 16.1.1, keyring 25.7.0, DuckDB 1.5.6, PyArrow 24.0.0, pytest 9.1.1. JavaScript dependency versions are retained in `package-lock.json`.
 

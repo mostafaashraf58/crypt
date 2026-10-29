@@ -1,6 +1,6 @@
 # Axiom Workstation
 
-**Status: working development build; not production-ready.** See [the completeness audit](docs/COMPLETENESS-AUDIT.md) before connecting an account. The Windows installer has not yet been built or verified.
+**Status: working development build; not production-ready.** See [the completeness audit](docs/COMPLETENESS-AUDIT.md) before connecting an account. The unsigned Windows x64 installer has been built and passed local installation, engine startup/authentication, shutdown cleanup, and uninstall checks; see [Windows verification](docs/WINDOWS-VERIFICATION.md).
 
 A single-user trading workstation with a React/TypeScript interface, a Python local engine, SQLite state, DuckDB/Parquet historical storage, and a Tauri 2 desktop shell. It runs on your own computer. There is no hosted backend or account system.
 
