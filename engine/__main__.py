@@ -12,6 +12,7 @@ def main():
     parser.add_argument("--port",type=int,default=8765)
     parser.add_argument("--data-dir",type=Path,default=Path.home()/".axiom")
     parser.add_argument("--token-stdin",action="store_true",help="Read {token:...} as one JSON line from stdin")
+    parser.add_argument("--production",action="store_true")
     args = parser.parse_args()
     if not args.token_stdin:
         parser.error("--token-stdin is required; the desktop shell securely provides a random session token")
@@ -36,7 +37,7 @@ def main():
         listener.setblocking(False)
         bound_port=listener.getsockname()[1]
         print("AXIOM_READY " + json.dumps({"port":bound_port},separators=(",",":")),flush=True)
-        config=uvicorn.Config(create_app(args.data_dir,token),host="127.0.0.1",port=bound_port,log_level="warning",access_log=False)
+        config=uvicorn.Config(create_app(args.data_dir,token,production=args.production),host="127.0.0.1",port=bound_port,log_level="warning",access_log=False)
         uvicorn.Server(config).run(sockets=[listener])
 
 

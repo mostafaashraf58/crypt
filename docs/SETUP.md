@@ -27,23 +27,15 @@ Desktop state lives in the per-user Tauri application data directory (on Windows
 
 Do not copy application databases while writing transactions or share another user's credential store. Back up local state after closing the desktop. Provider balances and orders should be reconciled before trading after a restart.
 
-## Providers
+## Bitfinex and independent modes
 
-### Alpaca
+Bitfinex is the only supported exchange. See [the workspace guide](BITFINEX-WORKSPACES.md) for account synchronization, candle inspection, strategy selection and the Trading page. Paper uses public Bitfinex data with virtual funds. Live reads the authenticated account and permits manual review or explicitly activated autonomous strategies. The two engines continue independently when the viewed mode changes. Both restart paused.
 
-Create a separate paper account/API key for initial testing. Select Alpaca in Connections and enter its key ID and secret. Use the paper environment first. Market-data access and websocket feeds depend on the account subscription. Stock markets observe exchange calendars; data availability outside market hours is provider-dependent.
-
-The adapter separates market-data, paper-trading, and live-trading service origins. Selecting a live account is not an instruction to place a real order. Live execution requires the explicit order-review flow.
-
-### Kraken
-
-Public crypto market-data routes do not require account credentials. Private account synchronization requires a Kraken API key and signing secret with the necessary permissions. Use minimum permissions; withdrawal permissions are unnecessary. Tradable symbol formats and historical interval availability are determined by the exchange. The current Kraken adapter does not establish full marked-to-market equity and position cost basis, so the execution safety layer blocks Kraken live proposals and confirmation. Kraken remains available for market data and account inspection. Alpaca supports the manually confirmed live-order path.
-
-Rate limits and service failures are surfaced as connection errors. An unavailable provider must not silently switch a live chart to fixture data. Offline fixture data stays labeled as such.
+Use Connections in Live mode to enter an API key and secret in the OS credential vault. Public charts and paper execution need no account credentials. Trading supports USDT spot pairs. All wallet types remain visible in Portfolio, but the reconciled trading totals cover exchange-wallet spot holdings valued in USDT. Reconciliation errors or stale data block trading; charts never fall back to fixture prices.
 
 ## Independent models
 
-Register a local or remote HTTP model endpoint, then assign it to an asset and prediction interval. The app does not train or embed an AI model. The deterministic mock model is available for offline integration tests. See [AI-API.md](AI-API.md) for the request contract.
+Register a local or remote HTTP model endpoint, then assign it to an asset and prediction interval. The app does not train models. An immutable deterministic momentum heuristic supports completed real candles; the separate legacy mock is available for offline integration tests. See [AI-API.md](AI-API.md) for the request contract.
 
 The desktop model form configures endpoint metadata and an optional bearer token. Credentials may also be configured through the authenticated local `POST /models` API using its `api_key` field. The API stores that value in the OS credential vault and omits it from returned registry records. The browser preview accepts no model secrets and does not make external predictions.
 
@@ -55,7 +47,7 @@ At a completed candle, the strategy compares `probability_up` with the entry thr
 
 Paper mode applies simulated fees and slippage to a virtual cash ledger. Live mode creates proposed orders; it must not authorize autonomous submission. Review symbol, side, quantity, price context, risk, account, and provider before confirmation. Never treat a model probability or a backtest result as a guarantee of a future outcome.
 
-Historical backtests use completed observations available at the decision time and execute at a later tradable price. The current backtest runner uses the deterministic momentum mock; historical replay through arbitrary HTTP models is not implemented. Keep enough warm-up history for models and indicators. Compare net results after fees and slippage, and inspect drawdown and trade count.
+Historical backtests use completed observations available at the decision time and execute at a later tradable price. The saved replay runner supports the assigned deterministic or HTTP model and persists progress for resumption. Keep enough warm-up history for models and indicators. Compare net results after fees and slippage, and inspect drawdown and trade count.
 
 ## Build an installer
 

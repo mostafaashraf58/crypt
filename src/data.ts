@@ -21,6 +21,7 @@ export function makeCandles(symbol:string, interval='1h', count=120): Candle[] {
   const scale=market.price/raw[raw.length-1].close; return raw.map(c=>({...c,open:c.open*scale,high:c.high*scale,low:c.low*scale,close:c.close*scale}));
 }
 export const initialModels:Model[]=[
+ {id:'builtin-momentum',name:'Deterministic momentum',endpoint:'builtin://momentum',version:'momentum-v1',timeout:5,status:'healthy',kind:'deterministic'},
  {id:'mock-momentum',name:'Momentum v2',endpoint:'mock://momentum',version:'2.1.0',timeout:5,status:'healthy',kind:'mock',latency:12,assets:3},
  {id:'mock-trend',name:'Trend classifier',endpoint:'mock://trend',version:'1.4.2',timeout:5,status:'healthy',kind:'mock',latency:8,assets:2},
  {id:'local-lstm',name:'Local LSTM',endpoint:'http://127.0.0.1:8081/predict',version:'1.0.0',timeout:10,status:'unknown',kind:'http',assets:0},
@@ -35,4 +36,4 @@ export const initialActivity:Activity[]=[
  {id:'a4',time:'2026-10-26T13:55:00Z',title:'Offline workspace ready',detail:'Deterministic market fixtures loaded',type:'system'},
 ];
 export const initialSignals:Signal[]=markets.slice(0,5).map((m,i)=>({id:'signal-'+i,symbol:m.symbol,action:i===2?'BUY':'HOLD',probability:m.probability,threshold:.65,time:FIXTURE_TIME,model:i<3?'Momentum v2':'Trend classifier',reason:'Deterministic offline fixture'}));
-export function createInitialState():WorkstationState {const equity=104382.64;const positions=initialPositions.map(p=>({...p,allocation:p.value/equity}));return{cash:equity-positions.reduce((s,p)=>s+p.value,0),equity,initialCash:100000,pnl:4382.64,positions,orders:[],signals:initialSignals.map(s=>({...s})),strategies:initialStrategies.map(s=>({...s})),models:initialModels.map(m=>({...m})),running:false,mode:'paper',risk:{maxAllocation:.25,maxDrawdown:.15,maxExposure:.8},activity:initialActivity.map(a=>({...a})),quotes:Object.fromEntries(markets.map(m=>[m.symbol,m.price])),connections:[{provider:'Alpaca',status:'disconnected'},{provider:'Kraken',status:'disconnected'}],fixtureStep:0,highWater:equity,dataSource:'fixture'};}
+export function createInitialState():WorkstationState {const equity=104382.64;const positions=initialPositions.map(p=>({...p,allocation:p.value/equity}));return{cash:equity-positions.reduce((s,p)=>s+p.value,0),equity,initialCash:100000,pnl:4382.64,positions,orders:[],signals:initialSignals.map(s=>({...s})),strategies:initialStrategies.map(s=>({...s})),models:initialModels.map(m=>({...m})),running:false,mode:'paper',risk:{maxAllocation:.25,maxDrawdown:.15,maxExposure:.8},activity:initialActivity.map(a=>({...a})),quotes:Object.fromEntries(markets.map(m=>[m.symbol,m.price])),connections:[{provider:'Bitfinex',status:'disconnected'}],fixtureStep:0,highWater:equity,dataSource:'fixture'};}

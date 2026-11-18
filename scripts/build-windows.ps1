@@ -9,7 +9,7 @@ if ($LASTEXITCODE) { throw "Python tests failed." }
 if ($LASTEXITCODE) { throw "Frontend logic tests failed." }
 & npm run build
 if ($LASTEXITCODE) { throw "Frontend build failed." }
-& .venv/Scripts/python.exe -m PyInstaller --noconfirm --clean --onefile --console --name axiom-engine --paths . --collect-all keyring --collect-all duckdb --collect-all uvicorn --collect-all websockets --collect-all httpx --distpath work/engine-bundle --workpath work/pyinstaller --specpath work engine/desktop_entry.py
+& .venv/Scripts/python.exe -m PyInstaller --noconfirm --clean --onefile --console --name axiom-engine --paths . --exclude-module pyarrow --exclude-module numpy --collect-all keyring --collect-all duckdb --collect-all uvicorn --collect-all websockets --collect-all httpx --distpath work/engine-bundle --workpath work/pyinstaller --specpath work engine/desktop_entry.py
 if ($LASTEXITCODE) { throw "Engine bundling failed." }
 $target = (& rustc -vV | Select-String '^host: ').ToString().Substring(6).Trim()
 New-Item -ItemType Directory -Force src-tauri/binaries | Out-Null

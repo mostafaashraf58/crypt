@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .venv/
+.venv-model/
 __pycache__/
 *.pyc
 *.db

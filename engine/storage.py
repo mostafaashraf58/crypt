@@ -32,18 +32,32 @@ class Store:
         except (OSError, BlockingIOError):
             self.instance_file.close()
             raise RuntimeError("An Axiom engine is already using this data directory") from None
-        self.db = sqlite3.connect(self.directory / "axiom.sqlite3", check_same_thread=False)
-        self.db.row_factory = sqlite3.Row
-        self.db.execute("PRAGMA journal_mode=WAL")
-        self.db.execute("PRAGMA synchronous=FULL")
-        self.db.executescript("""
-            CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY, result TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS audit (
-              sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-              timestamp TEXT NOT NULL, event TEXT NOT NULL, payload TEXT NOT NULL);
-        """)
-        self.db.commit()
+        try:
+            from .backup import apply_pending_restore
+            apply_pending_restore(self.directory)
+            self.db = sqlite3.connect(self.directory / "axiom.sqlite3", check_same_thread=False)
+            if self.db.execute("PRAGMA user_version").fetchone()[0]>2:
+                raise RuntimeError("Unsupported database version; do not overwrite newer data")
+            self.db.row_factory = sqlite3.Row
+            self.db.execute("PRAGMA journal_mode=WAL")
+            self.db.execute("PRAGMA synchronous=FULL")
+            self.db.executescript("""
+                CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY, result TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS records(namespace TEXT,key TEXT,value TEXT NOT NULL,PRIMARY KEY(namespace,key));
+                CREATE TABLE IF NOT EXISTS audit (
+                  sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                  timestamp TEXT NOT NULL, event TEXT NOT NULL, payload TEXT NOT NULL);
+            """)
+            self.db.execute("PRAGMA user_version=2")
+            if self.db.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+                raise RuntimeError("Database integrity check failed; restore a verified backup")
+            self.db.commit()
+        except BaseException:
+            if hasattr(self,"db"):
+                self.db.close()
+            self.instance_file.close()
+            raise
 
     def load(self) -> dict | None:
         with self.lock:
@@ -67,6 +81,29 @@ class Store:
         with self.lock:
             rows = self.db.execute("SELECT * FROM audit ORDER BY sequence DESC LIMIT ?", (min(max(int(limit), 1), 1000),)).fetchall()
             return [{**dict(row), "payload": json.loads(row["payload"])} for row in rows]
+
+    def record(self, namespace, key, value=None, *, write=False):
+        with self.lock:
+            if write:
+                with self.db:
+                    self.db.execute("INSERT INTO records VALUES (?,?,?) ON CONFLICT(namespace,key) DO UPDATE SET value=excluded.value",(namespace,key,json.dumps(value,allow_nan=False)))
+                return value
+            row=self.db.execute("SELECT value FROM records WHERE namespace=? AND key=?",(namespace,key)).fetchone()
+            return json.loads(row[0]) if row else None
+
+    def backup(self, destination):
+        """SQLite online backup includes committed WAL data without copying live files."""
+        destination=Path(destination)
+        destination.parent.mkdir(parents=True,exist_ok=True)
+        with self.lock:
+            target=sqlite3.connect(destination)
+            try:
+                self.db.backup(target)
+                if target.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                    raise RuntimeError("Backup integrity check failed")
+            finally:
+                target.close()
+        return destination
 
     def close(self) -> None:
         with self.lock:

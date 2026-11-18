@@ -24,6 +24,38 @@ def validate_probability(value):
     return float(value)
 
 
+def validate_forecast(body):
+    """Optional price fields extend the existing probability-only contract."""
+    forecast = {}
+    for name in ("predicted_close", "prediction_lower", "prediction_upper"):
+        if name in body:
+            value = body[name]
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+                raise ModelError(f"{name} must be a finite positive price")
+            forecast[name] = float(value)
+    bounds = {"prediction_lower", "prediction_upper"} & forecast.keys()
+    if bounds:
+        if len(bounds) != 2 or "predicted_close" not in forecast:
+            raise ModelError("A price range requires both bounds and predicted_close")
+        if not forecast["prediction_lower"] <= forecast["predicted_close"] <= forecast["prediction_upper"]:
+            raise ModelError("Price range must contain predicted_close")
+    if "interval_coverage" in body:
+        coverage = validate_probability(body["interval_coverage"])
+        if not bounds or not 0 < coverage < 1:
+            raise ModelError("interval_coverage requires a price range and must be between 0 and 1")
+        forecast["interval_coverage"] = coverage
+    if "calibrated" in body:
+        if not isinstance(body["calibrated"], bool):
+            raise ModelError("calibrated must be a boolean")
+        forecast["calibrated"] = body["calibrated"]
+    if "probability_method" in body:
+        method = body["probability_method"]
+        if not isinstance(method, str) or not method.strip() or len(method) > 100:
+            raise ModelError("probability_method must be a short nonempty string")
+        forecast["probability_method"] = method
+    return forecast
+
+
 def validate_endpoint(endpoint: str):
     parsed = urlparse(endpoint)
     if parsed.username or parsed.password or parsed.fragment or parsed.query or not parsed.hostname:
@@ -53,13 +85,21 @@ class ModelRegistry:
         self.db.executescript("""
             PRAGMA journal_mode=WAL;
             CREATE TABLE IF NOT EXISTS models(id TEXT PRIMARY KEY,name TEXT,endpoint TEXT,version TEXT,timeout REAL,status TEXT);
+            CREATE TABLE IF NOT EXISTS prediction_inputs(id TEXT PRIMARY KEY,payload BLOB NOT NULL);
             CREATE TABLE IF NOT EXISTS predictions(id TEXT PRIMARY KEY,model_id TEXT,symbol TEXT,interval TEXT,probability REAL,version TEXT,created REAL,input_hash TEXT);
         """)
-        self.db.execute("INSERT OR IGNORE INTO models VALUES (?,?,?,?,?,?)", ("mock-momentum", "Momentum fixture", "mock://momentum", "fixture-v1", 5, "healthy"))
+        self.db.execute("INSERT OR IGNORE INTO models(id,name,endpoint,version,timeout,status) VALUES (?,?,?,?,?,?)", ("mock-momentum", "Momentum fixture", "mock://momentum", "fixture-v1", 5, "healthy"))
+        self.db.execute("INSERT OR IGNORE INTO models(id,name,endpoint,version,timeout,status) VALUES (?,?,?,?,?,?)", ("builtin-momentum", "Deterministic momentum", "builtin://momentum", "momentum-v1", 5, "healthy"))
+        columns={r[1] for r in self.db.execute("PRAGMA table_info(models)")}
+        if "approved_version" not in columns:
+            self.db.execute("ALTER TABLE models ADD COLUMN approved_version TEXT")
+        prediction_columns = {r[1] for r in self.db.execute("PRAGMA table_info(predictions)")}
+        if "forecast" not in prediction_columns:
+            self.db.execute("ALTER TABLE predictions ADD COLUMN forecast TEXT")
         self.db.commit()
 
     def list(self):
-        return [dict(row) | {"kind": "mock" if row["endpoint"].startswith("mock:") else "http"} for row in self.db.execute("SELECT * FROM models ORDER BY rowid")]
+        return [dict(row) | {"kind": "deterministic" if row["endpoint"].startswith("builtin:") else "mock" if row["endpoint"].startswith("mock:") else "http"} for row in self.db.execute("SELECT * FROM models ORDER BY rowid")]
 
     def get(self, model_id):
         row = self.db.execute("SELECT * FROM models WHERE id=?", (model_id,)).fetchone()
@@ -68,6 +108,8 @@ class ModelRegistry:
         return dict(row)
 
     def add(self, config: dict):
+        if config.get("id") in {"mock-momentum", "builtin-momentum"}:
+            raise ModelError("Built-in deterministic models cannot be replaced")
         name = str(config.get("name", "")).strip()[:100]
         if not name:
             raise ModelError("A model name is required")
@@ -86,7 +128,9 @@ class ModelRegistry:
                 keyring.set_password("axiom-models", model_id, str(config["api_key"]))
             except Exception as exc:
                 raise ModelError("Operating system credential storage is unavailable") from exc
-        self.db.execute("INSERT INTO models VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,endpoint=excluded.endpoint,version=excluded.version,timeout=excluded.timeout,status='unchecked'", (model_id,name,endpoint,version,timeout,"unchecked"))
+        self.db.execute("INSERT INTO models(id,name,endpoint,version,timeout,status) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,endpoint=excluded.endpoint,version=excluded.version,timeout=excluded.timeout,status='unchecked'", (model_id,name,endpoint,version,timeout,"unchecked"))
+        if "approved_version" in config:
+            self.db.execute("UPDATE models SET approved_version=? WHERE id=?",(config.get("approved_version") or None,model_id))
         self.db.commit()
         return self.get(model_id)
 
@@ -98,11 +142,31 @@ class ModelRegistry:
             token = None
         return {"Authorization": f"Bearer {token}"} if token else {}
 
+    async def connect_local(self):
+        try:
+            async with httpx.AsyncClient(timeout=5, follow_redirects=False) as client:
+                response = await client.get("http://127.0.0.1:9001/health")
+                response.raise_for_status()
+                body = response.json()
+            version = body.get("model_version")
+            if body.get("status") != "ready" or body.get("service") != "axiom-chronos" or not isinstance(version, str) or not version or len(version) > 100:
+                raise ValueError("Unexpected local service")
+        except Exception as exc:
+            raise ModelError("Local model is unavailable. Run scripts/start-model.ps1 and wait for startup to complete, then connect again.") from exc
+        model = self.add({
+            "id": "local-chronos-bolt", "name": "Chronos-Bolt Small (local)",
+            "endpoint": "http://127.0.0.1:9001/predict", "version": version,
+            "approved_version": version, "timeout": 60,
+        })
+        self.db.execute("UPDATE models SET status='healthy' WHERE id=?", (model["id"],))
+        self.db.commit()
+        return self.get(model["id"])
+
     async def health(self, model_id):
         model = self.get(model_id)
         start = time.monotonic()
-        if model["endpoint"].startswith("mock:"):
-            status, version = "healthy", "fixture-v1"
+        if model["endpoint"].startswith(("mock:", "builtin:")):
+            status, version = "healthy", "momentum-v1" if model["endpoint"].startswith("builtin:") else "fixture-v1"
         else:
             parsed = urlparse(model["endpoint"])
             origin = f"{parsed.scheme}://{parsed.netloc}"
@@ -127,8 +191,9 @@ class ModelRegistry:
         model = self.get(model_id)
         request_id = str(uuid.uuid4())
         payload = {"schema_version":"1.0","request_id":request_id,"symbol":symbol,"interval":interval,"candles":candles,"features":{}}
-        if model["endpoint"].startswith("mock:"):
-            q, version = mock_prediction(candles), "fixture-v1"
+        forecast = {}
+        if model["endpoint"].startswith(("mock:", "builtin:")):
+            q, version = mock_prediction(candles), "momentum-v1" if model["endpoint"].startswith("builtin:") else "fixture-v1"
         else:
             try:
                 async with httpx.AsyncClient(timeout=model["timeout"], follow_redirects=False) as client:
@@ -141,24 +206,35 @@ class ModelRegistry:
                 version = str(body.get("model_version", ""))[:100]
                 if not version:
                     raise ModelError("Model response requires model_version")
+                if model.get("approved_version") and version!=model["approved_version"]:
+                    raise ModelError("Model version differs from the approved production version")
+                forecast = validate_forecast(body)
             except ModelError:
                 raise
             except Exception as exc:
                 raise ModelError("Prediction endpoint failed or timed out") from exc
+        import zlib
+        self.db.execute("INSERT INTO prediction_inputs VALUES (?,?)",(request_id,zlib.compress(json.dumps(payload,sort_keys=True).encode())))
         digest = hashlib.sha256(json.dumps(candles,sort_keys=True).encode()).hexdigest()
-        self.db.execute("INSERT INTO predictions VALUES (?,?,?,?,?,?,?,?)",(request_id,model_id,symbol,interval,q,version,time.time(),digest))
+        self.db.execute("INSERT INTO predictions(id,model_id,symbol,interval,probability,version,created,input_hash,forecast) VALUES (?,?,?,?,?,?,?,?,?)",(request_id,model_id,symbol,interval,q,version,time.time(),digest,json.dumps(forecast)))
         self.db.execute("UPDATE models SET status='healthy',version=? WHERE id=?",(version,model_id))
         self.db.commit()
-        return {"request_id":request_id,"probability_up":q,"model_version":version,"model_id":model_id}
+        return {"request_id":request_id,"probability_up":q,"model_version":version,"model_id":model_id,**forecast}
 
     def history(self, limit=100):
-        return [dict(row) for row in self.db.execute("SELECT * FROM predictions ORDER BY created DESC LIMIT ?",(min(1000,max(1,limit)),))]
+        rows = self.db.execute("SELECT * FROM predictions ORDER BY created DESC LIMIT ?",(min(1000,max(1,limit)),))
+        records = []
+        for row in rows:
+            record = dict(row)
+            forecast = record.pop("forecast")
+            records.append(record | json.loads(forecast or "{}"))
+        return records
 
     def close(self):
         self.db.close()
 
     def remove(self, model_id):
-        if model_id == "mock-momentum":
+        if model_id in {"mock-momentum", "builtin-momentum"}:
             raise ModelError("The deterministic fixture model cannot be removed")
         self.get(model_id)
         self.db.execute("DELETE FROM models WHERE id=?",(model_id,))

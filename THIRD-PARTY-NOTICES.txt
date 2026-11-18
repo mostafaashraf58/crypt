@@ -2,6 +2,15 @@ Axiom Workstation — Third-party notices
 
 Distributed source uses the dependencies in package-lock.json. The offline preview embeds these runtime components and fonts.
 
+The optional local model setup downloads amazon/chronos-bolt-small revision
+772f3d25d38aec6d914c8949dab4462e2d46f5d8 and installs chronos-forecasting 2.3.2.
+Both are provided by Amazon under Apache License 2.0. The downloaded model card
+is retained alongside the checkpoint. Model weights and the separate Python
+model runtime are downloaded by setup-model.ps1.
+Model card: https://huggingface.co/amazon/chronos-bolt-small
+Chronos license: https://github.com/amazon-science/chronos-forecasting/blob/main/LICENSE
+Other model runtime licenses are included with their installed Python packages.
+
 
 ===== react 19.3.1 (MIT) =====
 

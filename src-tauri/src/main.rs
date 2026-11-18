@@ -152,7 +152,7 @@ fn python_command(project: &PathBuf) -> Command {
 }
 
 fn start_engine(app: &tauri::AppHandle, shared: &SharedEngine) -> Result<(Child, EngineConnection, ProcessJob), Box<dyn std::error::Error>> {
-    let data_dir = app.path().app_local_data_dir()?;
+    let data_dir = std::env::var_os("AXIOM_DATA_DIR").map(PathBuf::from).unwrap_or(app.path().app_local_data_dir()?);
     fs::create_dir_all(&data_dir)?;
     // Python binds and retains its own ephemeral listening socket. Read the
     // chosen port only from this child's private stdout pipe, avoiding a local
@@ -174,6 +174,7 @@ fn start_engine(app: &tauri::AppHandle, shared: &SharedEngine) -> Result<(Child,
     command.args(["--port", "0", "--data-dir"])
         .arg(data_dir)
         .arg("--token-stdin")
+        .arg("--production")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());

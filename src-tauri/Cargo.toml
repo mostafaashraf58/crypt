@@ -1,6 +1,6 @@
 [package]
 name = "axiom-workstation"
-version = "0.1.0"
+version = "0.2.3"
 description = "A local, single-user trading workstation"
 authors = ["Axiom"]
 edition = "2021"

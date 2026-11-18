@@ -31,6 +31,25 @@ class APITests(unittest.IsolatedAsyncioTestCase):
         await self.lifespan.__aexit__(None,None,None)
         self.temp.cleanup()
 
+    async def test_bitfinex_connection_and_live_reconciliation_guard(self):
+        class Adapter:
+            async def account(self):
+                return {"provider":"bitfinex", "paper":False, "cash":1000, "equity":None,
+                        "positions":[], "orders":[], "reconciliation_complete":False}
+            async def fetch_assets(self): return [{"symbol":"BTC/USD"}]
+            async def close(self): pass
+        with patch("engine.api.provider_factory", return_value=Adapter()), patch("engine.api.secure_credentials") as vault:
+            response = await self.client.post("/connections", headers=AUTH, json={"provider":"bitfinex", "key":"key", "secret":"secret", "paper":False})
+            self.assertEqual(response.status_code, 200, response.text)
+            vault.assert_called_once_with("bitfinex", "key", "secret")
+        self.assertEqual((await self.client.get("/instruments?provider=bitfinex", headers=AUTH)).status_code, 200)
+        await self.client.post("/mode", headers=AUTH, json={"mode":"live"})
+        response = await self.client.post("/connections/bitfinex/sync", headers=AUTH)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("cost basis", response.text)
+        with patch("engine.api.delete_credentials"):
+            self.assertEqual((await self.client.delete("/connections/bitfinex", headers=AUTH)).status_code, 200)
+
     async def test_auth_and_dns_rebinding_protection(self):
         self.assertEqual((await self.client.get("/health")).status_code,200)
         self.assertEqual((await self.client.get("/snapshot")).status_code,401)
@@ -58,7 +77,7 @@ class APITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.put("/settings",headers=AUTH,json={"risk":{"unknown":1}})).status_code,400)
 
     async def test_paper_order_idempotency_and_restart(self):
-        payload={"symbol":"AAPL","side":"BUY","qty":10,"price":100,"id":"paper-test-unique"}
+        payload={"symbol":"ETH/USDT","side":"BUY","qty":10,"price":100,"id":"paper-test-unique"}
         first=await self.client.post("/orders",headers=AUTH,json=payload)
         second=await self.client.post("/orders",headers=AUTH,json=payload)
         self.assertEqual(first.status_code,200,first.text)
@@ -76,9 +95,9 @@ class APITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result["equity_curve"]),500)
 
     async def test_missing_provider_and_confirmation(self):
-        response=await self.client.post("/engine/start",headers=AUTH,json={"source":"alpaca"})
+        response=await self.client.post("/engine/start",headers=AUTH,json={"source":"bitfinex"})
         self.assertEqual(response.status_code,400)
-        response=await self.client.post("/proposals/missing/confirm",headers=AUTH,json={"provider":"alpaca","confirm":False})
+        response=await self.client.post("/proposals/missing/confirm",headers=AUTH,json={"provider":"bitfinex","confirm":False})
         self.assertEqual(response.status_code,400)
 
     async def test_models_registry_health_and_secret_omission(self):
@@ -111,11 +130,15 @@ class APITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len((await self.client.get("/snapshot",headers=AUTH)).json()["signals"]),count)
 
     async def _prepare_live(self,*,fail_submit=False):
+        core=self.app.state.core
+        core.state["strategies"]={}
+        core.configure_strategy({"symbol":"BTC/USDT"})
         class FakeProvider:
             paper=False
-            def __init__(self): self.sent=[]
+            def __init__(self): self.sent=[]; self.market_open=True
+            async def market_clock(self): return {"is_open":self.market_open}
             async def account(self): return {"cash":100000,"equity":100000,"positions":[],"orders":[]}
-            async def quote(self,symbol): return Quote(symbol,100,time.time(),"alpaca")
+            async def quote(self,symbol): return Quote(symbol,100,time.time(),"bitfinex")
             async def candles(self,*args): return []
             async def close(self): pass
             async def stream(self,symbols):
@@ -127,15 +150,15 @@ class APITests(unittest.IsolatedAsyncioTestCase):
                 return {"id":"broker-1","client_order_id":order["id"],"status":"accepted"}
         adapter=FakeProvider()
         with patch("engine.api.provider_factory",return_value=adapter),patch("engine.api.secure_credentials"):
-            response=await self.client.post("/connections",headers=AUTH,json={"provider":"alpaca","key":"fake-key","secret":"fake-secret","paper":False})
+            response=await self.client.post("/connections",headers=AUTH,json={"provider":"bitfinex","key":"fake-key","secret":"fake-secret","paper":False})
         self.assertEqual(response.status_code,200,response.text)
         self.assertNotIn("fake-secret",response.text)
         await self.client.post("/mode",headers=AUTH,json={"mode":"live"})
-        response=await self.client.post("/engine/start",headers=AUTH,json={"source":"alpaca"})
+        response=await self.client.post("/engine/start",headers=AUTH,json={"source":"bitfinex"})
         self.assertEqual(response.status_code,200,response.text)
         core=self.app.state.core
         core.set_running(True)
-        signal=core.tick("BTC/USD",100,.99,timestamp=time.time(),event_id="live-proposal-test",source="alpaca",interval_id=100)
+        signal=core.tick("BTC/USDT",100,.99,timestamp=time.time(),event_id="live-proposal-test",source="bitfinex",interval_id=100)
         self.assertEqual(signal["action"],"BUY",signal)
         core.set_running(False)
         return adapter,signal["proposal"]["id"]
@@ -144,34 +167,34 @@ class APITests(unittest.IsolatedAsyncioTestCase):
         adapter,proposal_id=await self._prepare_live()
         self.assertEqual(adapter.sent,[])
         path=f"/proposals/{proposal_id}/confirm"
-        self.assertEqual((await self.client.post(path,headers=AUTH,json={"provider":"alpaca","confirm":False})).status_code,400)
-        response=await self.client.post(path,headers=AUTH,json={"provider":"alpaca","confirm":True})
+        self.assertEqual((await self.client.post(path,headers=AUTH,json={"provider":"bitfinex","confirm":False})).status_code,400)
+        response=await self.client.post(path,headers=AUTH,json={"provider":"bitfinex","confirm":True})
         self.assertEqual(response.status_code,200,response.text)
         self.assertEqual(len(adapter.sent),1)
         self.assertTrue(adapter.sent[0]["confirmed"])
-        self.assertEqual((await self.client.post(path,headers=AUTH,json={"provider":"alpaca","confirm":True})).status_code,409)
+        self.assertEqual((await self.client.post(path,headers=AUTH,json={"provider":"bitfinex","confirm":True})).status_code,409)
         self.assertEqual(len(adapter.sent),1)
 
     async def test_ambiguous_live_submission_is_durable_and_never_retried(self):
         adapter,proposal_id=await self._prepare_live(fail_submit=True)
         path=f"/proposals/{proposal_id}/confirm"
-        response=await self.client.post(path,headers=AUTH,json={"provider":"alpaca","confirm":True})
+        response=await self.client.post(path,headers=AUTH,json={"provider":"bitfinex","confirm":True})
         self.assertEqual(response.status_code,400,response.text)
         snap=(await self.client.get("/snapshot",headers=AUTH)).json()
         proposal=next(p for p in snap["proposals"] if p["id"]==proposal_id)
         self.assertEqual(proposal["status"],"reconcile_required")
-        self.assertEqual((await self.client.post(path,headers=AUTH,json={"provider":"alpaca","confirm":True})).status_code,409)
+        self.assertEqual((await self.client.post(path,headers=AUTH,json={"provider":"bitfinex","confirm":True})).status_code,409)
         self.assertEqual(len(adapter.sent),1)
 
     async def test_manual_live_draft_requires_real_provider_and_uses_user_quantity(self):
-        payload={"symbol":"AAPL","side":"buy","qty":2.5,"price":1,"id":"manual-draft-test"}
+        payload={"symbol":"ETH/USDT","side":"buy","qty":2.5,"price":1,"id":"manual-draft-test"}
         self.assertEqual((await self.client.post("/proposals",headers=AUTH,json=payload)).status_code,400)
         await self.client.post("/mode",headers=AUTH,json={"mode":"live"})
         self.assertEqual((await self.client.post("/proposals",headers=AUTH,json=payload)).status_code,400)
         # Fixture-generated AI proposals are removed from this independent manual scenario.
         adapter,signal_id=await self._prepare_live()
         await self.client.post(f"/proposals/{signal_id}/cancel",headers=AUTH,json={})
-        response=await self.client.post("/proposals",headers=AUTH,json=payload|{"provider":"alpaca"})
+        response=await self.client.post("/proposals",headers=AUTH,json=payload|{"provider":"bitfinex"})
         self.assertEqual(response.status_code,200,response.text)
         draft=response.json()
         self.assertEqual(draft["status"],"awaiting_review")
@@ -179,16 +202,23 @@ class APITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(draft["price"],100)  # Provider quote replaces an untrusted browser reference.
         self.assertEqual(adapter.sent,[])
         path=f"/proposals/{draft['id']}/confirm"
-        response=await self.client.post(path,headers=AUTH,json={"provider":"alpaca","confirm":True})
+        response=await self.client.post(path,headers=AUTH,json={"provider":"bitfinex","confirm":True})
         self.assertEqual(response.status_code,200,response.text)
         self.assertEqual(len(adapter.sent),1)
         self.assertEqual(adapter.sent[0]["qty"],2.5)
 
+    async def test_removed_providers_are_rejected(self):
+        for provider in ("alpaca", "kraken"):
+            response = await self.client.post("/connections", headers=AUTH, json={"provider":provider,"key":"unused","secret":"unused"})
+            self.assertEqual(response.status_code,400,response.text)
+            self.assertIn("Only Bitfinex",response.text)
+
     async def test_provider_stream_stop_remains_active_when_model_engine_is_paused(self):
+        self.app.state.core.state["strategies"]={}
         queue=asyncio.Queue()
         class StreamingProvider:
             async def account(self): return {"cash":100000,"equity":100000,"positions":[],"orders":[]}
-            async def quote(self,symbol): return Quote(symbol,100,time.time(),"alpaca")
+            async def quote(self,symbol): return Quote(symbol,100,time.time(),"bitfinex")
             async def candles(self,*args): return []
             async def close(self): pass
             async def stream(self,symbols):
@@ -196,13 +226,13 @@ class APITests(unittest.IsolatedAsyncioTestCase):
                     yield await queue.get()
         adapter=StreamingProvider()
         with patch("engine.api.provider_factory",return_value=adapter),patch("engine.api.secure_credentials"):
-            response=await self.client.post("/connections",headers=AUTH,json={"provider":"alpaca","key":"fake-key","secret":"fake-secret","paper":True})
+            response=await self.client.post("/connections",headers=AUTH,json={"provider":"bitfinex","key":"fake-key","secret":"fake-secret","paper":True})
         self.assertEqual(response.status_code,200,response.text)
-        await self.client.post("/orders",headers=AUTH,json={"symbol":"BTC/USD","side":"buy","qty":1,"price":100})
-        response=await self.client.post("/engine/start",headers=AUTH,json={"source":"alpaca"})
+        await self.client.post("/orders",headers=AUTH,json={"symbol":"BTC/USDT","side":"buy","qty":1,"price":100})
+        response=await self.client.post("/engine/start",headers=AUTH,json={"source":"bitfinex"})
         self.assertEqual(response.status_code,200,response.text)
         await self.client.post("/engine/pause",headers=AUTH)
-        await queue.put(Quote("BTC/USD",90,time.time(),"alpaca"))
+        await queue.put(Quote("BTC/USDT",90,time.time(),"bitfinex"))
         deadline=time.monotonic()+1
         while time.monotonic()<deadline:
             await asyncio.sleep(.01)
@@ -242,10 +272,10 @@ class ModelContractTests(unittest.TestCase):
             async def fake_post(*args,**kwargs): return Response()
             with patch("httpx.AsyncClient.post",side_effect=fake_post):
                 with self.assertRaises(ModelError):
-                    asyncio.run(registry.predict(model["id"],"AAPL","1h",[{"close":100}]))
+                    asyncio.run(registry.predict(model["id"],"ETH/USDT","1h",[{"close":100}]))
             with patch("httpx.AsyncClient.post",side_effect=httpx.ReadTimeout("timeout")):
                 with self.assertRaises(ModelError):
-                    asyncio.run(registry.predict(model["id"],"AAPL","1h",[{"close":100}]))
+                    asyncio.run(registry.predict(model["id"],"ETH/USDT","1h",[{"close":100}]))
             self.assertEqual(registry.history(),[])
             registry.close()
 

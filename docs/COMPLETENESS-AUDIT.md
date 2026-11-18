@@ -1,14 +1,16 @@
 # Completeness audit
 
+A later source-and-simulation review found additional autonomous-execution blockers. See [Final vision review](FINAL-VISION-REVIEW.md) for four reproduced gaps, prioritized recommendations and release acceptance criteria. Historical checkpoints below remain as records of their covered checks.
+
 Verdict: NOT COMPLETE against the original production-quality Windows desktop brief. Passing offline tests establish the covered behavior, not production readiness.
 
-Updated with local Windows verification on 29 October 2026: 59 Python tests, 44 frontend checks, 29 offline Edge browser checks, and the production build passed. The native Windows x64 installer also passed installation, startup, engine health/authentication, shutdown cleanup, and uninstall checks. See `WINDOWS-VERIFICATION.md`. No real order was submitted.
+Updated with local Windows verification on 29 October 2026: 60 Python tests, 45 frontend checks, 29 offline Edge browser checks, and the production build passed. The native Windows x64 installer also passed installation, startup, engine health/authentication, shutdown cleanup, and uninstall checks. See `WINDOWS-VERIFICATION.md`. No real order was submitted.
 
 | Requirement area | Implemented | Remaining or unverified |
 |---|---|---|
 | Desktop architecture | Tauri 2 source, React/TypeScript/Tailwind, Python sidecar, SQLite, DuckDB/Parquet; native Windows x64 installer and installed engine lifecycle verified | Desktop visual workflows and WebView2 first-install provisioning remain unverified. |
-| Providers and accounts | Alpaca/Kraken adapters, asset discovery, OHLCV, reconnecting streams, credential-vault integration | Real account/subscription access unverified. Kraken equity/cost basis is incomplete and live proposals are blocked. A global source selection limits mixed-provider operation. |
-| Market behavior | UTC resampling, stale-data checks, bounded retries and historical requests | Market-clock methods exist but are not invoked by scheduling/confirmation. Exchange-session-aware aggregation and provider-specific fee handling need completion. Historical retrieval is bounded and is not a general historical download manager. |
+| Providers and accounts | Alpaca/Kraken/Bitfinex adapters, asset discovery, OHLCV, reconnecting streams, credential-vault integration | Real account/subscription access unverified. Kraken equity/cost basis is incomplete and live proposals are blocked. A global source selection limits mixed-provider operation. |
+| Market behavior | UTC resampling, stale-data checks, bounded retries and historical requests | Alpaca equity scheduling and confirmation now require a verified open session. Exchange-session-aware aggregation and provider-specific fee handling need completion. Historical retrieval is bounded and is not a general historical download manager. |
 | AI APIs | HTTP registry, authentication, validation, health/version checks, history, deterministic mock | Real external endpoint integration unverified. Historical backtests do not invoke assigned HTTP models. |
 | Strategy and risk | Threshold/default or separate exit, fixed/trailing stops, allocation/exposure/drawdown, independent provider-tick stop monitoring | Live operational behavior remains unverified. Browser simulation and desktop engine are separate implementations, so exhaustive parity is not established. |
 | Execution and recovery | Paper accounting, durable IDs, restart pause, local writer lock, reconciled proposals, separate confirmation | Real Alpaca submission/partial fills/reconciliation require account-based validation. Kraken live workflow is deliberately unavailable. Fault coverage is not exhaustive. |
@@ -17,4 +19,6 @@ Updated with local Windows verification on 29 October 2026: 59 Python tests, 44 
 | Security and testing | Session bearer over child stdin, exclusive loopback socket, OS-vault code, audit/idempotency, offline tests; Windows native compilation and installed engine authentication/cleanup verified | Windows vault and full frontend IPC workflows remain unverified. No real provider or independent model credentials supplied. |
 | Delivery | Source archive, offline preview, guides, API contract, test reports, locally built unsigned Windows x64 installer | Signing and release publication remain outside this local delivery. |
 
-Priority to completion: finish the provider/session and UI functionality gaps, add historical HTTP-model replay, establish complete crypto reconciliation, then verify desktop workflows, vault and provider/model behavior using provider sandboxes. Real-money execution must remain separately confirmed.
+Bitfinex USDT checkpoint (29 October 2026): exchange spot balances, fill/fee-based moving-average reconciliation, USDT denomination, protected fill-or-kill submissions, manual cancellations, and account synchronization are implemented. Real account validation remains outstanding; see [Bitfinex live verification](BITFINEX-LIVE.md). Missing or unmatched acquisition history blocks trading. Local stops execute automatically in an activated autonomous Bitfinex session, and otherwise remain review proposals.
+
+Priority to completion: finish the provider/session and UI functionality gaps, add historical HTTP-model replay, establish complete crypto reconciliation, then verify desktop workflows, vault and provider/model behavior using provider sandboxes. Manual drafts require separate confirmation; Bitfinex strategy autonomy requires explicit session activation and real-account validation.

@@ -1,0 +1,8 @@
+# Installed separately from the desktop engine by setup-model.ps1.
+# CPU PyTorch is installed first from its official wheel index.
+chronos-forecasting==2.3.2
+transformers==4.57.1
+huggingface-hub==0.36.0
+fastapi==0.115.12
+uvicorn==0.34.2
+httpx==0.28.1

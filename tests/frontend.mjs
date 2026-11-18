@@ -32,7 +32,7 @@ check('VM source preparation handles Windows CRLF and Unix LF', () => {
 });
 const source = prepareSource(fs.readFileSync('src/api.ts', 'utf8'));
 const compiled = await transform(source, { loader: 'ts', target: 'es2022' });
-vm.runInContext(compiled.code + ';globalThis.test={executePaper,localBacktest,revalue,actions,getInstruments,getState:()=>state,setState:s=>{state=s;},setConnection:c=>{connection=c;connected=!!c;},fixtureTick};', context);
+vm.runInContext(compiled.code + ';globalThis.test={normalizeSnapshot,executePaper,localBacktest,revalue,actions,getInstruments,getState:()=>state,setState:s=>{state=s;},setConnection:c=>{connection=c;connected=!!c;},fixtureTick};', context);
 const { executePaper, localBacktest, actions } = context.test;
 check('paper round trip debits fees and slippage and closes position', () => {
   const start = data.createInitialState();
@@ -81,8 +81,9 @@ await actions.cancelOrder(proposal.id);
 assert.equal(context.test.getState().orders[0].status, 'cancelled');
 passed++;
 console.log('PASS preview live workflow creates/cancels proposals and cannot submit real orders');
+await actions.setMode('paper');
 await actions.reset();
-await actions.connectProvider({ provider: 'alpaca', key: 'never-persist', secret: 'never-persist' }).then(() => assert.fail('Preview must reject credentials'), e => assert.match(e.message, /local desktop app/));
+await actions.connectProvider({ provider: 'bitfinex', key: 'never-persist', secret: 'never-persist' }).then(() => assert.fail('Preview must reject credentials'), e => assert.match(e.message, /local desktop app/));
 passed++;
 console.log('PASS preview refuses account secrets before storage or network access');
 check('disabled strategies retain independent paper risk stops during fixture replay', () => {
@@ -95,6 +96,7 @@ check('disabled strategies retain independent paper risk stops during fixture re
   assert(!context.test.getState().positions.some(p => p.symbol === 'BTC/USD'));
   assert(context.test.getState().orders.some(o => o.symbol === 'BTC/USD' && o.side === 'sell'));
 });
+await actions.setMode('paper');
 await actions.reset();
 await assert.rejects(actions.saveModel({ name: 'Local endpoint', endpoint: 'http://127.0.0.1:8081/predict', version: 'v1', timeout: 5, kind: 'http', status: 'unknown', apiKey: 'never-store-this' }), /never stored/);
 assert(!context.test.getState().models.some(m => 'apiKey' in m || 'api_key' in m));
@@ -107,7 +109,7 @@ context.fetch = async (url, options) => {
   if (url.endsWith('/proposals')) lastProposalPayload = JSON.parse(options.body);
   if (url.endsWith('/orders')) lastPaperPayload = JSON.parse(options.body);
   if (url.includes('/instruments?')) return { ok: true, json: async () => ({ instruments: [{ symbol: 'BTC/USD', name: 'Bitcoin', class: 'crypto' }, { symbol: 'ZZZZ', name: 'Sample equity', asset_class: 'us_equity' }] }) };
-  return { ok: true, json: async () => url.endsWith('/snapshot') ? { cash: 100000, equity: 100000, initial_cash: 100000, positions: [], orders: [], signals: [], strategies: [], proposals: [], mode: 'live', models: [{ id: 'existing-model', name: 'Endpoint', endpoint: 'http://127.0.0.1:8081/predict', status: 'unknown' }], data_source: 'alpaca' } : {} };
+  return { ok: true, json: async () => url.endsWith('/snapshot') ? { cash: 100000, equity: 100000, initial_cash: 100000, positions: [], orders: [], signals: [], strategies: [], proposals: [], mode: 'live', models: [{ id: 'existing-model', name: 'Endpoint', endpoint: 'http://127.0.0.1:8081/predict', status: 'unknown' }], data_source: 'bitfinex' } : {} };
 };
 context.test.setConnection({ url: 'http://127.0.0.1:43210', token: 'test-session-token' });
 await actions.saveModel({ id: 'existing-model', name: 'Endpoint', endpoint: 'http://127.0.0.1:8081/predict', version: 'v2', timeout: 5, kind: 'http', status: 'unknown', apiKey: 'test-vault-secret' });
@@ -116,17 +118,17 @@ assert.equal(lastModelPayload.api_key, 'test-vault-secret');
 assert.equal(context.test.getState().models[0].kind, 'http');
 assert(!('apiKey' in context.test.getState().models[0]));
 await actions.confirmOrder('test-proposal');
-assert.deepEqual(lastConfirmationPayload, { confirm: true, provider: 'alpaca' });
+assert.deepEqual(lastConfirmationPayload, { confirm: true, provider: 'bitfinex' });
 passed++;
 console.log('PASS desktop model configuration preserves id, sends vault secret only to engine, derives model kind, and confirms with provider');
-await actions.submitOrder({ symbol: 'BTC/USD', side: 'buy', qty: .01, price: 67000, provider: 'kraken' });
-assert.equal(lastProposalPayload.provider, 'kraken');
+await actions.submitOrder({ symbol: 'BTC/USD', side: 'buy', qty: .01, price: 67000, provider: 'bitfinex' });
+assert.equal(lastProposalPayload.provider, 'bitfinex');
 context.test.setState({ ...context.test.getState(), mode: 'paper' });
-await actions.submitOrder({ symbol: 'BTC/USD', side: 'buy', qty: .01, price: 67000, provider: 'alpaca' });
+await actions.submitOrder({ symbol: 'BTC/USD', side: 'buy', qty: .01, price: 67000, provider: 'bitfinex' });
 assert(!('provider' in lastPaperPayload));
 passed++;
 console.log('PASS live proposals include selected provider while paper payloads omit unsupported fields');
-const instruments = await context.test.getInstruments('alpaca');
+const instruments = await context.test.getInstruments('bitfinex');
 assert.equal(instruments.length, 2);
 assert.equal(instruments[0].category, 'crypto');
 assert.equal(instruments[1].category, 'stock');
@@ -135,4 +137,37 @@ assert.equal((await context.test.getInstruments('fixture')).length, data.markets
 context.test.setConnection(null);
 passed++;
 console.log('PASS instrument discovery normalizes asset descriptors without leaking fixture prices');
+check('live snapshots preserve exchange records and never reuse fixture quotes or paper orders', () => {
+ const order={id:'external-42',symbol:'BTC/USDT',side:'buy',qty:1,filled_qty:.2,remaining_qty:.8,price:100,avg_price:101,status:'open',exchange_status:'PARTIALLY FILLED',type:'EXCHANGE LIMIT',created_at:100,updated_at:200};
+ const raw={mode:'live',account_ready:false,cash:null,equity:null,initial_cash:null,positions:[],orders:[{id:'paper-only'}],broker_orders:[order],proposals:[],models:[],prices:{},data_source:'bitfinex'};
+ const normalized=context.test.normalizeSnapshot(raw);
+ assert.equal(normalized.accountReady,false);
+ assert.equal(normalized.orders.length,0);
+ assert.equal(normalized.brokerOrders[0].id,'external-42');
+ assert.equal(normalized.brokerOrders[0].filled_qty,.2);
+ assert.equal(Object.keys(normalized.quotes).length,0);
+});
+context.test.setState({...data.createInitialState(),running:true});
+await actions.setMode('live');
+assert.equal(context.test.getState().positions.length,0);
+const liveUnchanged=JSON.stringify(context.test.getState());
+context.test.fixtureTick();
+assert.equal(JSON.stringify(context.test.getState()),liveUnchanged);
+await actions.setMode('paper');
+assert.equal(context.test.getState().running,true);
+assert.equal(context.test.getState().fixtureStep,1);
+passed++;
+console.log('PASS isolated preview paper trading continues while live is viewed');
+context.window = {__TAURI_INTERNALS__: {}};
+const beforeDisconnect = JSON.stringify(context.test.getState());
+for (const [name, args] of [
+ ['setRunning', [true]], ['setMode', ['live']], ['saveStrategy', [{}]],
+ ['submitOrder', [{symbol:'BTC/USD',side:'buy',qty:1,price:100}]],
+ ['cancelOrder', ['missing']], ['runBacktest', [{}]], ['saveModel', [{}]],
+ ['removeModel', ['missing']], ['testModel', ['missing']], ['setRisk', [{}]], ['reset', []],
+]) await assert.rejects(actions[name](...args), /Desktop engine is disconnected/);
+assert.equal(JSON.stringify(context.test.getState()), beforeDisconnect);
+delete context.window;
+passed++;
+console.log('PASS disconnected desktop blocks workspace actions without changing state');
 console.log(`Frontend checks: ${passed} passed`);

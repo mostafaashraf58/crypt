@@ -145,65 +145,65 @@ class EngineTests(unittest.TestCase):
 
     def test_manual_live_draft_is_durable_and_never_executes(self):
         self.engine.set_mode("live")
-        self.engine.reconcile_live_account({"provider": "alpaca", "cash": 100000, "equity": 100000}, [])
-        proposal = self.engine.propose_order("AAPL", "BUY", 5, 200, "manual-draft", source="alpaca")
+        self.engine.reconcile_live_account({"provider": "bitfinex", "cash": 100000, "equity": 100000}, [])
+        proposal = self.engine.propose_order("ETH/USDT", "BUY", 5, 200, "manual-draft", source="bitfinex")
         self.assertEqual(proposal["status"], "awaiting_review")
         self.assertEqual(self.engine.snapshot()["orders"], [])
         self.assertEqual(self.engine.snapshot()["positions"], [])
-        self.assertEqual(self.engine.propose_order("AAPL", "BUY", 5, 200, "manual-draft", source="alpaca"), proposal)
+        self.assertEqual(self.engine.propose_order("ETH/USDT", "BUY", 5, 200, "manual-draft", source="bitfinex"), proposal)
         self.engine.close()
         self.engine = Engine(self.directory.name)
-        self.assertEqual(self.engine.propose_order("AAPL", "BUY", 5, 200, "manual-draft", source="alpaca"), proposal)
+        self.assertEqual(self.engine.propose_order("ETH/USDT", "BUY", 5, 200, "manual-draft", source="bitfinex"), proposal)
         self.assertEqual(len(self.engine.snapshot()["proposals"]), 1)
 
     def test_manual_live_draft_blocks_fake_or_stale_data_and_paper_mode(self):
         with self.assertRaises(ValueError):
-            self.engine.propose_order("AAPL", "BUY", 5, 200)
+            self.engine.propose_order("ETH/USDT", "BUY", 5, 200)
         self.engine.set_mode("live")
-        self.engine.reconcile_live_account({"provider": "alpaca", "cash": 100000, "equity": 100000}, [])
+        self.engine.reconcile_live_account({"provider": "bitfinex", "cash": 100000, "equity": 100000}, [])
         with self.assertRaises(ValueError):
-            self.engine.propose_order("AAPL", "BUY", 5, 200, source="fixture")
+            self.engine.propose_order("ETH/USDT", "BUY", 5, 200, source="fixture")
         with self.assertRaises(ValueError):
-            self.engine.propose_order("AAPL", "BUY", 5, 200, timestamp=datetime.now(timezone.utc) - timedelta(minutes=5))
+            self.engine.propose_order("ETH/USDT", "BUY", 5, 200, timestamp=datetime.now(timezone.utc) - timedelta(minutes=5))
         with self.assertRaises(ValueError):
-            self.engine.propose_order("AAPL", "BUY", float("nan"), 200)
+            self.engine.propose_order("ETH/USDT", "BUY", float("nan"), 200)
         with self.assertRaises(ValueError):
-            self.engine.propose_order("AAPL", "BUY", 5, 200, source="kraken")
+            self.engine.propose_order("ETH/USDT", "BUY", 5, 200, source="kraken")
 
     def test_manual_live_draft_checks_broker_orders_and_reserves_cash(self):
         self.engine.set_mode("live")
-        account = {"provider": "alpaca", "cash": 1000, "equity": 100000,
-                   "orders": [{"symbol": "AAPL", "side": "buy", "qty": "2", "filled_qty": "0", "limit_price": "200", "status": "new"}]}
+        account = {"provider": "bitfinex", "cash": 1000, "equity": 100000,
+                   "orders": [{"symbol": "ETH/USDT", "side": "buy", "qty": "2", "filled_qty": "0", "limit_price": "200", "status": "new"}]}
         self.engine.reconcile_live_account(account, [])
         with self.assertRaises(ValueError):
-            self.engine.propose_order("AAPL", "BUY", 1, 200)
+            self.engine.propose_order("ETH/USDT", "BUY", 1, 200)
         account["orders"] = []
         self.engine.reconcile_live_account(account, [])
-        self.engine.propose_order("AAPL", "BUY", 3, 200)
+        self.engine.propose_order("ETH/USDT", "BUY", 3, 200)
         with self.assertRaises(ValueError):
-            self.engine.propose_order("MSFT", "BUY", 3, 200)
+            self.engine.propose_order("SOL/USDT", "BUY", 3, 200)
 
     def test_manual_live_draft_checks_allocation_and_sell_holdings(self):
         self.engine.set_mode("live")
-        self.engine.reconcile_live_account({"provider": "alpaca", "cash": 100000, "equity": 100000},
-                                           [{"symbol": "BTCUSD", "qty": "1", "avg_entry_price": "100", "current_price": "100"}])
+        self.engine.reconcile_live_account({"provider": "bitfinex", "cash": 100000, "equity": 100000},
+                                           [{"symbol": "BTC/USDT", "qty": "1", "avg_entry_price": "100", "current_price": "100"}])
         with self.assertRaises(ValueError):
-            self.engine.propose_order("AAPL", "BUY", 300, 100)
+            self.engine.propose_order("ETH/USDT", "BUY", 300, 100)
         with self.assertRaises(ValueError):
-            self.engine.propose_order("BTC/USD", "SELL", 2, 100)
-        result = self.engine.propose_order("BTC/USD", "SELL", .5, 100)
+            self.engine.propose_order("BTC/USDT", "SELL", 2, 100)
+        result = self.engine.propose_order("BTC/USDT", "SELL", .5, 100)
         self.assertEqual(result["status"], "awaiting_review")
         self.assertEqual(self.engine.snapshot()["positions"][0]["qty"], 1)
 
     def test_drawdown_blocks_live_buys_but_allows_risk_reducing_sell(self):
         self.engine.set_mode("live")
-        self.engine.reconcile_live_account({"provider": "alpaca", "cash": 99900, "equity": 100000},
-                                           [{"symbol": "AAPL", "qty": 1, "avg_entry_price": 100, "current_price": 100}])
-        self.engine.reconcile_live_account({"provider": "alpaca", "cash": 79900, "equity": 80000},
-                                           [{"symbol": "AAPL", "qty": 1, "avg_entry_price": 100, "current_price": 100}])
+        self.engine.reconcile_live_account({"provider": "bitfinex", "cash": 99900, "equity": 100000},
+                                           [{"symbol": "ETH/USDT", "qty": 1, "avg_entry_price": 100, "current_price": 100}])
+        self.engine.reconcile_live_account({"provider": "bitfinex", "cash": 79900, "equity": 80000},
+                                           [{"symbol": "ETH/USDT", "qty": 1, "avg_entry_price": 100, "current_price": 100}])
         with self.assertRaises(ValueError):
-            self.engine.propose_order("MSFT", "BUY", 1, 100)
-        proposal = self.engine.propose_order("AAPL", "SELL", 1, 100)
+            self.engine.propose_order("SOL/USDT", "BUY", 1, 100)
+        proposal = self.engine.propose_order("ETH/USDT", "SELL", 1, 100)
         self.assertEqual(self.engine.claim_proposal(proposal["id"], quote_price=100)["side"], "SELL")
 
     def test_automatic_live_signal_obeys_outstanding_broker_order_guard(self):
